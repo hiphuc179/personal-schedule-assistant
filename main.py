@@ -1,28 +1,140 @@
 import streamlit as st
 from streamlit_calendar import calendar
+from database.database_service import EventManager
+from datetime import datetime, time, timedelta
 
-
+event_service = EventManager()
 st.set_page_config(
     layout="wide",
     page_title="App đặt lịch",
 )
 
-@st.dialog("Thêm sự kiện")
-def modal_add_event():
-    form_add_event = st.form("Thêm sự kiện")
+if "dialog_add_open" not in st.session_state:
+    st.session_state["dialog_add_open"] = False
+if "dialog_update_open" not in st.session_state:
+    st.session_state["dialog_update_open"] = False
+if "calendar_version" not in st.session_state:
+    st.session_state["calendar_version"] = 0
+
+@st.dialog("Thêm sự kiện",on_dismiss="ignore")
+def dialog_add_event():
+    form_add_event = st.form("Thêm sự kiện", enter_to_submit=False)
     with form_add_event:
-        input_event_title = st.text_input("Tên sự kiện")
+        input_event_name = st.text_input("Tên sự kiện")
         input_address = st.text_input("Nơi diễn ra")
-        input_event_date = st.date_input("Nhập thời gian bắt đầu")
+        input_start_date = st.date_input("Nhập ngày bắt đầu")
         input_start_time = st.time_input("Nhập thời gian bắt đầu",value="now")
+        input_end_date = st.date_input("Nhập ngày kết thúc (nếu có)", value=None)
         input_end_time = st.time_input("Nhập thời gian kết thúc", value=None)
         input_reminder_time = st.number_input("Thời gian nhắc trước (phút)", value=10)
 
     submitted = form_add_event.form_submit_button("Tạo")
     if submitted:
+        start_datetime_string = datetime.combine(input_start_date, input_start_time).isoformat()
+        end_datetime_string = None
+        if input_end_date is None and input_end_time is None:
+            end_datetime_string = datetime.combine(input_end_date, input_end_time).isoformat() if input_end_date and input_end_time else None
 
+        event_service.create_event(
+            eventName=input_event_name,
+            place=input_address,
+            startTime=start_datetime_string,
+            endTime=end_datetime_string,
+            reminderTime=int(input_reminder_time)
+        )
+        st.success("Sự kiện đã được tạo")
         st.rerun()
 
+@st.dialog("Cập nhận sự kiện",on_dismiss="ignore")
+def dialog_update_event(event_id):
+    event = event_service.get_event_by_id(event_id)
+    form_add_event = st.form("Cập nhật sự kiện", enter_to_submit=False)
+    with form_add_event:
+        input_event_name = st.text_input("Tên sự kiện", value=event.event_name)
+        input_address = st.text_input("Nơi diễn ra", value=event.place)
+        input_start_date = st.date_input("Nhập ngày bắt đầu", value=datetime.fromisoformat(event.start_time).date())
+        input_start_time = st.time_input("Nhập thời gian bắt đầu", value=datetime.fromisoformat(event.start_time).time())
+        input_end_date = st.date_input("Nhập ngày kết thúc (nếu có)", value=datetime.fromisoformat(event.end_time).date() if event.end_time else None)
+        input_end_time = st.time_input("Nhập thời gian kết thúc", value=datetime.fromisoformat(event.end_time).time() if event.end_time else None)
+        input_reminder_time = st.number_input("Thời gian nhắc trước (phút)", value=event.reminder_time or 10)
+
+    submitted = form_add_event.form_submit_button("Tạo")
+    if submitted:
+        start_datetime_string = datetime.combine(input_start_date, input_start_time).isoformat()
+        end_datetime_string = None
+        if input_end_date is None and input_end_time is None:
+            end_datetime_string = datetime.combine(input_end_date, input_end_time).isoformat() if input_end_date and input_end_time else None
+        status = "active" if datetime.fromisoformat(start_datetime_string) > datetime.now() else "inactive"
+        event_service.update_event(
+            eventName=input_event_name,
+            place=input_address,
+            startTime=start_datetime_string,
+            endTime=end_datetime_string,
+            reminderTime=int(input_reminder_time),
+            eventId=event.id,
+            status=status
+        )
+        st.success("Sự kiện đã được cập nhật")
+        st.rerun()
+
+def fetch_events_array():
+    events = event_service.get_all_events()
+    events_array = []
+    for event in events:
+        event_dict = {
+            "id": event.id,
+            "title": event.event_name,
+            "start": event.start_time,
+        }
+        if event.end_time:
+            event_dict["end"] = event.end_time
+        events_array.append(event_dict)
+    return events_array
+
+
+@st.dialog("Chi tiết sự kiện",on_dismiss="ignore")
+def dialog_detail_event(id):
+    if id is None:
+        st.info("Không có dữ liệu sự kiện để hiển thị.")
+        st.rerun()
+    event_id = id
+    try:
+        event_id = int(id)
+    except Exception:
+        event_id = id
+
+    event = event_service.get_event_by_id(event_id)
+    if event is None:
+        return
+
+    st.write("**Tên sự kiện:**", event.event_name)
+    st.write("**Địa điểm:**", event.place)
+    st.write("**Bắt đầu:**", event.start_time)
+    st.write("**Kết thúc:**", event.end_time or "(Không có)")
+    st.write("**Nhắc trước (phút):**", event.reminder_time or "(Không có)")
+
+    
+    
+    col1, col2 = st.columns([1,1])
+    with col1:
+        btn_edit = st.button("Chỉnh sửa")
+        if btn_edit:
+            print("Edit event:", event.id)
+            dialog_update_event(event_id=event.id)
+    with col2:
+        btn_delete = st.button("Xóa")
+        if btn_delete:
+            try:
+                deleted = event_service.delete_event(event_id=event.id)
+                if deleted:
+                    st.session_state["calendar_version"] += 1
+                    st.success("Sự kiện đã được xóa")
+                    st.rerun()
+                else:
+                    st.error("Xóa thất bại: sự kiện không tồn tại hoặc đã được xóa")
+            except Exception as e:
+                st.error(f"Xóa thất bại: {e}")
+            
 
 def display_calendar():
     options = {
@@ -45,12 +157,7 @@ def display_calendar():
             },
     }
 
-    events = [
-        {"title": "Conference", "start": "2025-11-10T10:40:00"},
-        {"title": "Conference", "start": "2025-11-10T10:40:00"},
-        {"title": "Conference", "start": "2025-11-10T10:40:00"},
-        {"title": "Team Meeting", "start": "2025-11-11"}
-    ]
+    events = fetch_events_array()
 
     custom_css="""
         .fc-event-past {
@@ -80,8 +187,14 @@ def display_calendar():
         events=events,
         options=options,
         custom_css=custom_css,
-        key='calendar', # Assign a widget key to prevent state loss
+        key=f"calendar-{st.session_state['calendar_version']}",
+        callbacks=["eventClick"]
         )
+    
+    if calendar_event:
+        if "callback" in calendar_event and calendar_event["callback"] == "eventClick":
+            clicked_event = calendar_event["eventClick"]["event"]
+            dialog_detail_event(id=clicked_event.get('id'))
 
 def display_main():
     st.header("Đặt lịch")
@@ -106,7 +219,7 @@ def display_main():
             with right_right:
                 btn_add_event = st.button("Thêm sự kiện")
                 if btn_add_event:
-                    modal_add_event()
+                    dialog_add_event()
         
         #left-side
         with left:
