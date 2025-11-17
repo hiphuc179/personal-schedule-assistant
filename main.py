@@ -9,13 +9,14 @@ st.set_page_config(
     page_title="App đặt lịch",
 )
 
-if "dialog_add_open" not in st.session_state:
-    st.session_state["dialog_add_open"] = False
-if "dialog_update_open" not in st.session_state:
-    st.session_state["dialog_update_open"] = False
 if "calendar_version" not in st.session_state:
     st.session_state["calendar_version"] = 0
-
+if "suppress_event_click" not in st.session_state:
+    st.session_state["suppress_event_click"] = False
+if "pending_open_event_id" not in st.session_state:
+    st.session_state["pending_open_event_id"] = None
+if "pending_update_event_id" not in st.session_state:
+    st.session_state["pending_update_event_id"] = None
 @st.dialog("Thêm sự kiện",on_dismiss="ignore")
 def dialog_add_event():
     form_add_event = st.form("Thêm sự kiện", enter_to_submit=False)
@@ -43,6 +44,7 @@ def dialog_add_event():
             reminderTime=int(input_reminder_time)
         )
         st.success("Sự kiện đã được tạo")
+        st.session_state["suppress_event_click"] = True
         st.rerun()
 
 @st.dialog("Cập nhận sự kiện",on_dismiss="ignore")
@@ -58,7 +60,8 @@ def dialog_update_event(event_id):
         input_end_time = st.time_input("Nhập thời gian kết thúc", value=datetime.fromisoformat(event.end_time).time() if event.end_time else None)
         input_reminder_time = st.number_input("Thời gian nhắc trước (phút)", value=event.reminder_time or 10)
 
-    submitted = form_add_event.form_submit_button("Tạo")
+    submitted = form_add_event.form_submit_button("Lưu")
+
     if submitted:
         start_datetime_string = datetime.combine(input_start_date, input_start_time).isoformat()
         end_datetime_string = None
@@ -75,6 +78,7 @@ def dialog_update_event(event_id):
             status=status
         )
         st.success("Sự kiện đã được cập nhật")
+        st.session_state["suppress_event_click"] = True
         st.rerun()
 
 def fetch_events_array():
@@ -107,20 +111,25 @@ def dialog_detail_event(id):
     if event is None:
         return
 
+    def format_datetime(iso_string):
+        if not iso_string:
+            return ""
+        dt_object = datetime.fromisoformat(iso_string)
+        return dt_object.strftime("%H:%M %d/%m/%Y")
+
     st.write("**Tên sự kiện:**", event.event_name)
     st.write("**Địa điểm:**", event.place)
-    st.write("**Bắt đầu:**", event.start_time)
-    st.write("**Kết thúc:**", event.end_time or "(Không có)")
+    st.write("**Bắt đầu:**", format_datetime(event.start_time))
+    st.write("**Kết thúc:**", format_datetime(event.end_time) or "(Không có)")
     st.write("**Nhắc trước (phút):**", event.reminder_time or "(Không có)")
 
-    
-    
     col1, col2 = st.columns([1,1])
     with col1:
         btn_edit = st.button("Chỉnh sửa")
         if btn_edit:
-            print("Edit event:", event.id)
-            dialog_update_event(event_id=event.id)
+            # Queue the update dialog to open at top-level on next run
+            st.session_state["pending_update_event_id"] = event.id
+            st.rerun()
     with col2:
         btn_delete = st.button("Xóa")
         if btn_delete:
@@ -128,15 +137,15 @@ def dialog_detail_event(id):
                 deleted = event_service.delete_event(event_id=event.id)
                 if deleted:
                     st.session_state["calendar_version"] += 1
+                    st.session_state["suppress_event_click"] = True
                     st.success("Sự kiện đã được xóa")
                     st.rerun()
                 else:
                     st.error("Xóa thất bại: sự kiện không tồn tại hoặc đã được xóa")
             except Exception as e:
                 st.error(f"Xóa thất bại: {e}")
-            
 
-def display_calendar():
+def display_calendar(allow_dialog=True):
     options = {
         "locale": "vi",
         "editable": True,
@@ -191,27 +200,33 @@ def display_calendar():
         callbacks=["eventClick"]
         )
     
-    if calendar_event:
-        if "callback" in calendar_event and calendar_event["callback"] == "eventClick":
-            clicked_event = calendar_event["eventClick"]["event"]
-            dialog_detail_event(id=clicked_event.get('id'))
+    if allow_dialog and calendar_event:
+        if st.session_state.get("suppress_event_click"):
+            st.session_state["suppress_event_click"] = False
+        else:
+            if "callback" in calendar_event and calendar_event["callback"] == "eventClick":
+                clicked_event = calendar_event["eventClick"]["event"]
+                st.session_state["pending_open_event_id"] = clicked_event.get('id')
+                st.rerun()
 
 def display_main():
     st.header("Đặt lịch")
     header_left, header_right = st.columns([5,1],vertical_alignment="bottom")
-   
+    
+    is_add_opening = False
+    is_update_opening = False
+    
     with header_left:
         st.text_input(label="Mô tả sự kiện", placeholder="Tên sự kiện, thời gian, địa điểm,...")
     with header_right :
-        btn_add_event = st.button("Thêm sự kiện tự động")
+        
+        btn_add_event_auto = st.button("Thêm sự kiện tự động")
       
-
     main_container = st.container()
     with main_container:
         
         left, right = st.columns([1,1])
         
-        #right-side
         with right:
             right_left, right_right = st.columns([1,1],vertical_alignment="bottom")
             with right_left:
@@ -219,13 +234,23 @@ def display_main():
             with right_right:
                 btn_add_event = st.button("Thêm sự kiện")
                 if btn_add_event:
+
+                    is_add_opening = True
                     dialog_add_event()
         
-        #left-side
         with left:
-            display_calendar()
 
-    event_search_result_container = st.container
+            allow_calendar_dialog = not is_add_opening and not is_update_opening
+            display_calendar(allow_dialog=allow_calendar_dialog)
 
+
+if st.session_state.get("pending_update_event_id"):
+    pending = st.session_state.pop("pending_update_event_id")
+    st.session_state["suppress_event_click"] = True
+    dialog_update_event(pending)
+elif st.session_state.get("pending_open_event_id"):
+    pending = st.session_state.pop("pending_open_event_id")
+    st.session_state["suppress_event_click"] = True
+    dialog_detail_event(pending)
 
 display_main()
