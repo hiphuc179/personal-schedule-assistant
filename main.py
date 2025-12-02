@@ -24,6 +24,11 @@ if "nlp_engine" not in st.session_state:
 if "calendar_version" not in st.session_state: st.session_state["calendar_version"] = 0
 if "nlp_data_cache" not in st.session_state: st.session_state["nlp_data_cache"] = None
 
+# Thêm state quản lý dialogs
+if "active_dialog" not in st.session_state: st.session_state["active_dialog"] = None
+if "dialog_event_id" not in st.session_state: st.session_state["dialog_event_id"] = None
+if "dialog_habit_id" not in st.session_state: st.session_state["dialog_habit_id"] = None
+
 # CSS
 st.markdown("""
     <style>
@@ -107,14 +112,21 @@ def dialog_edit_event(event_id):
         
         remind = st.number_input("Nhắc trước (phút)", value=int(e.reminder_time or 0))
         
-        if st.form_submit_button("Cập nhật"):
-            start_iso = datetime.combine(d, t).isoformat()
-            st.session_state.db_service.update_event(
-                event_id, name, start_iso, loc, None, remind, e.status
-            )
-            st.success("Đã cập nhật!")
-            st.session_state["calendar_version"] += 1
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("Cập nhật", use_container_width=True):
+                start_iso = datetime.combine(d, t).isoformat()
+                st.session_state.db_service.update_event(
+                    event_id, name, start_iso, loc, None, remind, e.status
+                )
+                st.success("Đã cập nhật!")
+                st.session_state["calendar_version"] += 1
+                st.session_state["active_dialog"] = None
+                st.rerun()
+        with col2:
+            if st.form_submit_button("Hủy", use_container_width=True):
+                st.session_state["active_dialog"] = None
+                st.rerun()
 
 # --- DIALOG SỬA THÓI QUEN (MỚI) ---
 @st.dialog("Chỉnh sửa thói quen", on_dismiss="ignore")
@@ -138,14 +150,19 @@ def dialog_edit_habit(habit_id):
         
         remind = st.number_input("Nhắc trước (phút)", value=int(h.reminder_time or 0))
         
-        if st.form_submit_button("Cập nhật"):
-            # Logic update habit (Cần implement trong DB nếu muốn chuẩn)
-            # Tạm thời: Xóa cũ tạo mới cho nhanh
-            st.session_state.db_service.delete_habit(habit_id)
-            st.session_state.db_service.create_habit(name, freq, place=loc, reminderTime=remind)
-            
-            st.success("Đã cập nhật!")
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("Cập nhật", use_container_width=True):
+                st.session_state.db_service.delete_habit(habit_id)
+                st.session_state.db_service.create_habit(name, freq, place=loc, reminderTime=remind)
+                
+                st.success("Đã cập nhật!")
+                st.session_state["active_dialog"] = None
+                st.rerun()
+        with col2:
+            if st.form_submit_button("Hủy", use_container_width=True):
+                st.session_state["active_dialog"] = None
+                st.rerun()
 
 @st.dialog("Xác nhận thông tin AI", on_dismiss="ignore")
 def dialog_confirm_nlp(data, intent):
@@ -180,6 +197,7 @@ def dialog_confirm_nlp(data, intent):
                 st.toast("Đã tạo sự kiện!")
             
             st.session_state["nlp_data_cache"] = None
+            st.session_state["active_dialog"] = None
             st.session_state["calendar_version"] += 1
             st.rerun()
 
@@ -192,11 +210,19 @@ def dialog_add_event():
         with c1: d = st.date_input("Ngày")
         with c2: t = st.time_input("Giờ")
         remind = st.number_input("Nhắc trước (phút)", value=15)
-        if st.form_submit_button("Lưu"):
-            start = datetime.combine(d, t).isoformat()
-            st.session_state.db_service.create_event(name, start, place=loc, reminderTime=remind)
-            st.session_state["calendar_version"] += 1
-            st.rerun()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("Lưu", use_container_width=True):
+                start = datetime.combine(d, t).isoformat()
+                st.session_state.db_service.create_event(name, start, place=loc, reminderTime=remind)
+                st.session_state["calendar_version"] += 1
+                st.session_state["active_dialog"] = None
+                st.rerun()
+        with col2:
+            if st.form_submit_button("Hủy", use_container_width=True):
+                st.session_state["active_dialog"] = None
+                st.rerun()
 
 @st.dialog("Chi tiết", on_dismiss="ignore")
 def dialog_detail(id):
@@ -207,14 +233,22 @@ def dialog_detail(id):
         st.write(f"⏰ {e.start_time}")
         st.write(f"🔔 Nhắc: {e.reminder_time}p")
         
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("✏️ Sửa", use_container_width=True):
-                dialog_edit_event(id) # Mở dialog sửa
+                # Thay vì gọi dialog trực tiếp, set state và rerun
+                st.session_state["active_dialog"] = "edit_event"
+                st.session_state["dialog_event_id"] = id
+                st.rerun()
         with c2:
             if st.button("🗑️ Xóa", type="primary", use_container_width=True):
                 st.session_state.db_service.delete_event(id)
                 st.session_state["calendar_version"] += 1
+                st.session_state["active_dialog"] = None
+                st.rerun()
+        with c3:
+            if st.button("Đóng", use_container_width=True):
+                st.session_state["active_dialog"] = None
                 st.rerun()
 
 # ==========================================
@@ -257,7 +291,11 @@ def render_calendar(events):
         callbacks=["eventClick"]
     )
     if cal and "eventClick" in cal:
-        dialog_detail(cal["eventClick"]["event"]["id"])
+        # Chỉ set nếu active_dialog chưa được set (tránh override)
+        if not st.session_state.get("active_dialog"):
+            st.session_state["active_dialog"] = "detail"
+            st.session_state["dialog_event_id"] = cal["eventClick"]["event"]["id"]
+            st.rerun()
 
     st.divider()
     st.subheader("📝 Danh sách sự kiện")
@@ -272,9 +310,10 @@ def render_calendar(events):
                     dt = e.start_time
                 c2.caption(f"🕒 {dt}")
                 c3.caption(f"📍 {e.place or '-'}")
-                # Only open dialog when button is clicked!
                 if c4.button("✏️", key=f"ed_e_{e.id}"):
-                    dialog_edit_event(e.id)
+                    st.session_state["active_dialog"] = "edit_event"
+                    st.session_state["dialog_event_id"] = e.id
+                    st.rerun()
                 if c5.button("🗑️", key=f"del_e_{e.id}"):
                     st.session_state.db_service.delete_event(e.id)
                     st.session_state["calendar_version"] += 1
@@ -285,7 +324,10 @@ def render_calendar(events):
 def render_habits(habits):
     if st.button("➕ Thêm thủ công", use_container_width=True):
         st.session_state["nlp_data_cache"] = None
-        dialog_add_event()
+        st.session_state["active_dialog"] = "add_event"
+        st.session_state["dialog_event_id"] = None  # Clear event_id
+        st.rerun()
+    
     st.divider()
     st.subheader("🔥 Giữ Lửa Thói Quen")
     if habits:
@@ -314,6 +356,19 @@ def render_habits(habits):
 
 def main():
     st.title("📅 Quản Lý Lịch Trình")
+    
+    # Render dialog dựa trên state TRƯỚC khi render UI chính
+    active_dialog = st.session_state.get("active_dialog")
+    
+    if active_dialog == "detail" and st.session_state.get("dialog_event_id"):
+        dialog_detail(st.session_state["dialog_event_id"])
+    elif active_dialog == "edit_event" and st.session_state.get("dialog_event_id"):
+        dialog_edit_event(st.session_state["dialog_event_id"])
+    elif active_dialog == "edit_habit" and st.session_state.get("dialog_habit_id"):
+        dialog_edit_habit(st.session_state["dialog_habit_id"])
+    elif active_dialog == "add_event":
+        dialog_add_event()
+    
     user_text, search_kw = render_header()
 
     if st.session_state["nlp_data_cache"]:
