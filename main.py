@@ -220,46 +220,30 @@ def dialog_detail(id):
 # ==========================================
 # 4. GIAO DIỆN CHÍNH
 # ==========================================
-st.title("📅 Quản Lý Lịch Trình")
+def render_header():
+    c_nlp, c_btn, c_search = st.columns([4, 1, 2], vertical_alignment="bottom")
+    with c_nlp:
+        user_text = st.text_input("🤖 AI:", placeholder="VD: Họp team lúc 9h sáng mai", key="nlp_in")
+    with c_btn:
+        if st.button("✨ Thêm tự động", use_container_width=True):
+            if user_text:
+                try:
+                    res = st.session_state.nlp_engine.process_command(user_text)
+                    st.session_state["nlp_data_cache"] = res
+                except Exception as e:
+                    st.error(f"Lỗi: {e}")
+    with c_search:
+        search_kw = st.text_input("🔍 Tìm kiếm:", placeholder="Tìm sự kiện...", key="search_in")
+    return user_text, search_kw
 
-# HEADER
-c_nlp, c_btn, c_search = st.columns([4, 1, 2], vertical_alignment="bottom")
-
-with c_nlp:
-    user_text = st.text_input("🤖 AI:", placeholder="VD: Họp team lúc 9h sáng mai", key="nlp_in")
-
-with c_btn:
-    if st.button("✨ Thêm tự động", use_container_width=True):
-        if user_text:
-            try:
-                res = st.session_state.nlp_engine.process_command(user_text)
-                st.session_state["nlp_data_cache"] = res
-            except Exception as e: st.error(f"Lỗi: {e}")
-
-with c_search:
-    search_kw = st.text_input("🔍 Tìm kiếm:", placeholder="Tìm sự kiện...", key="search_in")
-
-if st.session_state["nlp_data_cache"]:
-    res = st.session_state["nlp_data_cache"]
-    dialog_confirm_nlp(res['data'], res['intent'])
-
-# BODY
-col_cal, col_habit = st.columns([2.5, 1]) 
-
-# CỘT TRÁI
-with col_cal:
-    events = st.session_state.db_service.get_all_events()
-    if search_kw: events = [e for e in events if search_kw.lower() in e.event_name.lower()]
-    
-    cal_events = []
-    for e in events:
-        cal_events.append({
-            "id": str(e.id),
-            "title": e.event_name,
-            "start": e.start_time,
-            "end": e.end_time,
-            "backgroundColor": "#3788d8"
-        })
+def render_calendar(events):
+    cal_events = [{
+        "id": str(e.id),
+        "title": e.event_name,
+        "start": e.start_time,
+        "end": e.end_time,
+        "backgroundColor": "#3788d8"
+    } for e in events]
 
     cal = calendar(
         events=cal_events,
@@ -282,12 +266,13 @@ with col_cal:
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 1])
                 c1.write(f"**{e.event_name}**")
-                try: dt = datetime.fromisoformat(e.start_time).strftime("%H:%M %d/%m")
-                except: dt = e.start_time
+                try:
+                    dt = datetime.fromisoformat(e.start_time).strftime("%H:%M %d/%m")
+                except:
+                    dt = e.start_time
                 c2.caption(f"🕒 {dt}")
                 c3.caption(f"📍 {e.place or '-'}")
-                
-                # Nút Sửa và Xóa
+                # Only open dialog when button is clicked!
                 if c4.button("✏️", key=f"ed_e_{e.id}"):
                     dialog_edit_event(e.id)
                 if c5.button("🗑️", key=f"del_e_{e.id}"):
@@ -297,16 +282,12 @@ with col_cal:
     else:
         st.info("Chưa có sự kiện nào.")
 
-# CỘT PHẢI: HABIT + GIỮ LỬA 🔥
-with col_habit:
+def render_habits(habits):
     if st.button("➕ Thêm thủ công", use_container_width=True):
         st.session_state["nlp_data_cache"] = None
         dialog_add_event()
-        
     st.divider()
     st.subheader("🔥 Giữ Lửa Thói Quen")
-    habits = st.session_state.db_service.get_all_habits()
-    
     if habits:
         for h in habits:
             with st.container(border=True):
@@ -314,27 +295,40 @@ with col_habit:
                 with c1:
                     st.markdown(f"**{h.habit_name}**")
                     st.caption(f"{h.frequency} | {h.place or '-'}")
-                
                 with c2:
-                    # Check xem hôm nay đã làm chưa
                     today_str = datetime.now().strftime("%Y-%m-%d")
                     is_done = h.last_completed == today_str
-                    
                     btn_label = f"🔥 {h.current_streak}"
-                    
                     if is_done:
-                        # Đã làm -> Disable nút
                         st.button(btn_label, key=f"done_{h.id}", disabled=True, help="Đã hoàn thành hôm nay!")
                     else:
-                        # Chưa làm -> Bấm để check-in
                         if st.button(btn_label, key=f"check_{h.id}", type="primary", help="Bấm để điểm danh!"):
                             st.session_state.db_service.check_in_habit(h.id)
-                            st.balloons() # 🎆 BẮN PHÁO HOA
+                            st.balloons()
                             st.rerun()
-                
-                # Nút xóa nhỏ
                 if st.button("🗑️", key=f"del_h_{h.id}"):
                     st.session_state.db_service.delete_habit(h.id)
                     st.rerun()
     else:
         st.caption("Chưa có thói quen.")
+
+def main():
+    st.title("📅 Quản Lý Lịch Trình")
+    user_text, search_kw = render_header()
+
+    if st.session_state["nlp_data_cache"]:
+        res = st.session_state["nlp_data_cache"]
+        dialog_confirm_nlp(res['data'], res['intent'])
+
+    col_cal, col_habit = st.columns([2.5, 1])
+    with col_cal:
+        events = st.session_state.db_service.get_all_events()
+        if search_kw:
+            events = [e for e in events if search_kw.lower() in e.event_name.lower()]
+        render_calendar(events)
+    with col_habit:
+        habits = st.session_state.db_service.get_all_habits()
+        render_habits(habits)
+
+if __name__ == "__main__" or True:  # Streamlit runs the script top-down, so just call main()
+    main()

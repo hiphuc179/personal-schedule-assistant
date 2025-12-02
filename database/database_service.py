@@ -116,6 +116,16 @@ class EventManager:
                 return cursor.rowcount > 0
         except sqlite3.Error: return False
 
+    def update_event(self, event_id, name, start_time, place, end_time, reminder_time, status):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE events
+                SET eventName = ?, startTime = ?, place = ?, endTime = ?, reminderTime = ?, status = ?
+                WHERE id = ?
+            """, (name, start_time, place, end_time, reminder_time, status, event_id))
+            conn.commit()
+
     # --- HABITS (NÂNG CẤP LOGIC GIỮ LỬA) ---
     def create_habit(self, habitName, frequency, place=None, executionTime=None, reminderTime=5, status="active"):
         sql = "INSERT INTO habits (habitName, place, frequency, executionTime, reminderTime, status, currentStreak, lastCompleted) VALUES (?, ?, ?, ?, ?, ?, 0, NULL)"
