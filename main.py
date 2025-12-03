@@ -233,7 +233,7 @@ def dialog_detail(id):
         st.write(f"⏰ {e.start_time}")
         st.write(f"🔔 Nhắc: {e.reminder_time}p")
         
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
             if st.button("✏️ Sửa", use_container_width=True):
                 # Thay vì gọi dialog trực tiếp, set state và rerun
@@ -244,10 +244,6 @@ def dialog_detail(id):
             if st.button("🗑️ Xóa", type="primary", use_container_width=True):
                 st.session_state.db_service.delete_event(id)
                 st.session_state["calendar_version"] += 1
-                st.session_state["active_dialog"] = None
-                st.rerun()
-        with c3:
-            if st.button("Đóng", use_container_width=True):
                 st.session_state["active_dialog"] = None
                 st.rerun()
 
