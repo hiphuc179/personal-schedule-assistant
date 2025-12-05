@@ -97,6 +97,16 @@ class EventManager:
                     row["endTime"], row["reminderTime"], row["status"]
                 ) for row in rows]
         except sqlite3.Error: return []
+    def get_active_events(self):
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.cursor().execute("SELECT * FROM events WHERE status='active' ORDER BY startTime").fetchall()
+                return [EventDto(
+                    row["id"], row["eventName"], row["place"], row["startTime"], 
+                    row["endTime"], row["reminderTime"], row["status"]
+                ) for row in rows]
+        except sqlite3.Error: return []
 
     def get_event_by_id(self, event_id):
         try:
@@ -124,6 +134,17 @@ class EventManager:
                 SET eventName = ?, startTime = ?, place = ?, endTime = ?, reminderTime = ?, status = ?
                 WHERE id = ?
             """, (name, start_time, place, end_time, reminder_time, status, event_id))
+            conn.commit()
+
+    def update_event_into_inactive(self, event_id,):
+        status="inactive"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE events
+                SET status = ?
+                WHERE id = ?
+            """, ( status, event_id))
             conn.commit()
 
     # --- HABITS (NÂNG CẤP LOGIC GIỮ LỬA) ---

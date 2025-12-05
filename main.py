@@ -1,3 +1,4 @@
+from traceback import format_list
 import streamlit as st
 from streamlit_calendar import calendar
 from database.database_service import EventManager
@@ -47,9 +48,7 @@ def check_reminders():
     if "db_service" not in st.session_state: return
     
     now = datetime.now()
-    # Quan trọng: Lấy lại connection mới mỗi lần chạy trong fragment để tránh lỗi thread
-    # (Trong code db_service đã handle việc mở/đóng conn rồi nên gọi hàm là được)
-    events = st.session_state.db_service.get_all_events()
+    events = st.session_state.db_service.get_active_events()
     
     found_alarm = False
     
@@ -65,19 +64,17 @@ def check_reminders():
                     time_str = start_dt.strftime('%H:%M')
                     msg = f"⏰ Sắp diễn ra: **{e.event_name}** lúc {time_str}"
                     if e.place: msg += f" tại {e.place}"
-                    
-                    # 1. Hiện Pop-up
+                    # Xoá sự kiện khỏi active để không nhắc lại
+                    st.session_state.db_service.update_event_into_inactive(e.id)
                     st.toast(msg, icon="🔔")
                     found_alarm = True
-                    
+            else:
+                st.session_state.db_service.update_event_into_inactive(e.id)
         except Exception:
             continue
             
-    # 2. Phát Âm thanh (Nếu có sự kiện cần nhắc)
     if found_alarm:
-        # Link âm thanh "Beep" ngắn gọn
         sound_url = "assets/I-will-survive.mp3" 
-        
         st.audio(sound_url, format="audio/mp3", autoplay=True)
 
 check_reminders()
@@ -224,6 +221,12 @@ def dialog_add_event():
             if st.form_submit_button("Hủy", use_container_width=True):
                 st.session_state["active_dialog"] = None
                 st.rerun()
+def format_date_time(dt_str):
+    try:  
+        dt = datetime.fromisoformat(dt_str)
+        return dt.strftime("%H:%M %d/%m/%Y")
+    except:
+        return dt_str
 
 @st.dialog("Chi tiết", on_dismiss="ignore")
 def dialog_detail(id):
@@ -231,7 +234,8 @@ def dialog_detail(id):
     if e:
         st.subheader(e.event_name)
         st.write(f"📍 {e.place or '-'}")
-        st.write(f"⏰ {e.start_time}")
+        st.write(f"⏰ Bắt đầu: {format_date_time(e.start_time)}")
+        st.write(f"🏁 Kết thúc: {format_date_time(e.end_time) or 'Không có'}")
         st.write(f"🔔 Nhắc: {e.reminder_time}p")
         
         c1, c2 = st.columns(2)
@@ -279,10 +283,19 @@ def render_calendar(events):
     cal = calendar(
         events=cal_events,
         options={
-            "headerToolbar": {"left": "today prev,next", "center": "title", "right": "dayGridMonth,timeGridWeek"},
+            "headerToolbar": {"left": "today prev,next", "center": "title", "right": "timeGridDay,timeGridWeek,dayGridMonth"},
             "initialView": "dayGridMonth",
             "locale": "vi",
-            "height": 550
+            "height": 550,
+            "buttonText": {
+                "today": "Hôm nay",
+                "month": "Tháng",
+                "week": "Tuần",
+                "day": "Ngày",
+                "list": "Danh sách",
+                "prev": "Trước",
+                "next": "Sau"
+            }
         },
         key=f"cal_{st.session_state['calendar_version']}",
         callbacks=["eventClick"]
@@ -373,17 +386,46 @@ def main():
     with st.sidebar:
         st.header("📂 Quản lý dữ liệu")
         st.info("Xuất dữ liệu ra file JSON để sao lưu hoặc nộp bài.")
-        
-        # Nút tải về
+
+        # Nút tải về file mẫu
+        sample_data = {
+            "events": [
+                {
+                    "id": 1,
+                    "event_name": "Họp nhóm",
+                    "place": "Phòng A",
+                    "start_time": "2025-12-06T09:00:00",
+                    "end_time": "2025-12-06T10:00:00",
+                    "reminder_time": 10,
+                    "status": "active"
+                }
+            ],
+            "habits": [
+                {
+                    "id": 1,
+                    "habit_name": "Đọc sách",
+                    "place": "Nhà",
+                    "frequency": "daily",
+                    "reminder_time": 5,
+                    "status": "active",
+                    "current_streak": 2,
+                    "last_completed": "2025-12-05"
+                }
+            ]
+        }
+        st.download_button(
+            label="📄 Tải file mẫu (sample.json)",
+            data=json.dumps(sample_data, indent=4, ensure_ascii=False),
+            file_name="sample.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+        # Nút tải về dữ liệu thực tế
         if st.button("📦 Chuẩn bị file Backup", use_container_width=True):
-            # 1. Lấy dữ liệu từ DB
             export_data = st.session_state.db_service.export_all_data()
-            
             if export_data:
-                # 2. Chuyển thành chuỗi JSON
                 json_str = json.dumps(export_data, indent=4, ensure_ascii=False)
-                
-                # 3. Hiện nút Download
                 st.download_button(
                     label="⬇️ Tải xuống (backup_data.json)",
                     data=json_str,
@@ -394,8 +436,42 @@ def main():
                 st.success("Dữ liệu đã sẵn sàng!")
             else:
                 st.error("Lỗi khi lấy dữ liệu!")
+
+        # Nút import file JSON
+        st.divider()
+        st.header("📥 Nhập dữ liệu từ file JSON")
+        uploaded_file = st.file_uploader("Chọn file JSON để nhập dữ liệu", type=["json"])
+        if uploaded_file is not None:
+            try:
+                import_data = json.load(uploaded_file)
+                if st.button("🚀 Nhập dữ liệu", use_container_width=True):
+                    # Import Events
+                    events = import_data.get("events", [])
+                    for e in events:
+                        st.session_state.db_service.create_event(
+                            e.get("event_name", ""),
+                            e.get("start_time", ""),
+                            status=e.get("status", "active"),
+                            place=e.get("place", ""),
+                            endTime=e.get("end_time", None),
+                            reminderTime=e.get("reminder_time", 5)
+                        )
+                    # Import Habits
+                    habits = import_data.get("habits", [])
+                    for h in habits:
+                        st.session_state.db_service.create_habit(
+                            h.get("habit_name", ""),
+                            h.get("frequency", "daily"),
+                            place=h.get("place", ""),
+                            reminderTime=h.get("reminder_time", 5),
+                            status=h.get("status", "active")
+                        )
+                    st.success("Nhập dữ liệu thành công!")
+                    st.session_state["calendar_version"] += 1
+                    st.rerun()
+            except Exception as ex:
+                st.error(f"Lỗi khi đọc file: {ex}")
     
-    # ... (Phần code hiển thị lịch cũ giữ nguyên) ...
     if st.session_state["nlp_data_cache"]:
         res = st.session_state["nlp_data_cache"]
         dialog_confirm_nlp(res['data'], res['intent'])
