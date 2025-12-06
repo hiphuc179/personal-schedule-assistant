@@ -122,8 +122,8 @@ class TestRunner:
         print(f"🕒 Thời gian test: {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
         print("="*110 + "\n")
 
-        print(f"{'ID':<3} | {'INPUT':<45} | {'STATUS':<8} | {'CHI TIẾT LỖI (NẾU CÓ)'}")
-        print("-" * 130)
+        print(f"{'ID':<3} | {'INPUT':<45} | {'EVENT':<18} | {'ĐỊA ĐIỂM':<20} | {'BẮT ĐẦU':<8} | {'KẾT THÚC':<8} | {'HABIT':<8} | {'STATUS':<8} | {'CHI TIẾT LỖI (NẾU CÓ)'}")
+        print("-" * 170)
 
         for i, case in enumerate(TEST_CASES, 1):
             input_text = case["text"]
@@ -136,6 +136,15 @@ class TestRunner:
                 # 2. Map kết quả thực tế sang format đơn giản để so sánh
                 actual = self._map_result(result, expected)
                 
+                # >>> IN THÔNG TIN CHI TIẾT KẾT QUẢ PHÂN TÍCH <<<
+                disp = result.get("display_data", {})
+                data = result.get("data", {})
+                event_name = data.get('event_name', '-')
+                location = disp.get('location', '-')
+                start = disp.get('start', '-')
+                end = disp.get('end', '-')
+                habit = disp.get('habit', '-')
+
                 # 3. So sánh
                 errors = self._compare(expected, actual)
                 
@@ -150,8 +159,8 @@ class TestRunner:
 
                 # Format text cho đẹp
                 display_text = (input_text[:42] + '..') if len(input_text) > 42 else input_text
-                print(f"{i:<3} | {display_text:<45} | {status:<8} | {error_msg}")
-            
+                print(f"{i:<3} | {display_text:<45} | {event_name:<18} | {location:<20} | {start:<8} | {end:<8} | {habit:<8} | {status:<8} | {error_msg}")
+    
             except Exception as e:
                 self.failed += 1
                 print(f"{i:<3} | {input_text:<45} | 💥 CRASH | {str(e)}")
