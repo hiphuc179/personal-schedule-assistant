@@ -217,7 +217,10 @@ def dialog_add_event():
         with col1:
             if st.form_submit_button("Lưu", use_container_width=True):
                 start = datetime.combine(d, t).isoformat()
-                end = datetime.combine(d_end, t_end).isoformat()
+                end = None
+                if t_end is not None and d_end is not None:
+                    end = datetime.combine(d_end, t_end).isoformat()
+                    
                 st.session_state.db_service.create_event(
                     name, start, place=loc, reminderTime=remind, endTime=end
                 )
