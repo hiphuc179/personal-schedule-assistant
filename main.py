@@ -95,7 +95,7 @@ def dialog_edit_event(event_id):
         name = st.text_input("Tên sự kiện", value=e.event_name)
         loc = st.text_input("Địa điểm", value=e.place or "")
         
-        # Parse time cũ
+        # Parse thời gian bắt đầu
         try:
             dt_old = datetime.fromisoformat(e.start_time)
             d_val = dt_old.date()
@@ -104,9 +104,26 @@ def dialog_edit_event(event_id):
             d_val = datetime.now().date()
             t_val = datetime.now().time()
 
+        # Parse thời gian kết thúc (nếu có)
+        try:
+            if e.end_time:
+                dt_end = datetime.fromisoformat(e.end_time)
+                d_end_val = dt_end.date()
+                t_end_val = dt_end.time()
+            else:
+                d_end_val = d_val
+                t_end_val = t_val
+        except:
+            d_end_val = d_val
+            t_end_val = t_val
+
         c1, c2 = st.columns(2)
-        with c1: d = st.date_input("Ngày", value=d_val)
-        with c2: t = st.time_input("Giờ", value=t_val)
+        with c1:
+            d = st.date_input("Ngày", value=d_val)
+            d_end = st.date_input("Ngày kết thúc", value=d_end_val)
+        with c2:
+            t = st.time_input("Giờ", value=t_val)
+            t_end = st.time_input("Giờ kết thúc", value=t_end_val)
         
         remind = st.number_input("Nhắc trước (phút)", value=int(e.reminder_time or 0))
         
@@ -114,8 +131,9 @@ def dialog_edit_event(event_id):
         with col1:
             if st.form_submit_button("Cập nhật", use_container_width=True):
                 start_iso = datetime.combine(d, t).isoformat()
+                end_iso = datetime.combine(d_end, t_end).isoformat() if d_end and t_end else None
                 st.session_state.db_service.update_event(
-                    event_id, name, start_iso, loc, None, remind, e.status
+                    event_id, name, start_iso, loc, end_iso, remind, e.status
                 )
                 st.success("Đã cập nhật!")
                 st.session_state["calendar_version"] += 1
@@ -126,7 +144,7 @@ def dialog_edit_event(event_id):
                 st.session_state["active_dialog"] = None
                 st.rerun()
 
-# --- DIALOG SỬA THÓI QUEN (MỚI) ---
+# --- DIALOG SỬA THÓI QUEN ---
 @st.dialog("Chỉnh sửa thói quen", on_dismiss="ignore")
 def dialog_edit_habit(habit_id):
     # Lưu ý: Cần thêm hàm get_habit_by_id trong DB Service nếu chưa có
