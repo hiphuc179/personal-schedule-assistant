@@ -205,15 +205,22 @@ def dialog_add_event():
         name = st.text_input("Tên sự kiện")
         loc = st.text_input("Địa điểm")
         c1, c2 = st.columns(2)
-        with c1: d = st.date_input("Ngày")
-        with c2: t = st.time_input("Giờ")
+        with c1: 
+            d = st.date_input("Ngày")
+            d_end = st.date_input("Ngày kết thúc", value=None)
+        with c2: 
+            t = st.time_input("Giờ bắt đầu")
+            t_end = st.time_input("Giờ kết thúc", value=None)
         remind = st.number_input("Nhắc trước (phút)", value=15)
         
         col1, col2 = st.columns(2)
         with col1:
             if st.form_submit_button("Lưu", use_container_width=True):
                 start = datetime.combine(d, t).isoformat()
-                st.session_state.db_service.create_event(name, start, place=loc, reminderTime=remind)
+                end = datetime.combine(d_end, t_end).isoformat()
+                st.session_state.db_service.create_event(
+                    name, start, place=loc, reminderTime=remind, endTime=end
+                )
                 st.session_state["calendar_version"] += 1
                 st.session_state["active_dialog"] = None
                 st.rerun()
